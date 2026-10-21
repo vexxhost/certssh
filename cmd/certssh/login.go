@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -39,6 +40,7 @@ func cmdLogin(g *globals, args []string) error {
 		hostCA      = fs.String("host-ca", "", "SSH host CA mount (default ssh-host-signer, - for none)")
 		signRole    = fs.String("signing-role", "", "SSH signing role for this persona (default: the persona's name)")
 		profiles    = fs.String("profiles", "", "site profile file")
+		hostCAPats  = fs.String("host-ca-patterns", "", "comma-separated host patterns the host CA is trusted for (default: the profiles' hosts, or * without profiles)")
 		noBrowser   = fs.Bool("no-browser", false, "print the login URL instead of opening a browser")
 		noTrust     = fs.Bool("no-trust", false, "do not install the host CA in ~/.ssh/known_hosts")
 	)
@@ -101,6 +103,9 @@ func cmdLogin(g *globals, args []string) error {
 	set(&ctx.CA.Host, *hostCA)
 	if *profiles != "" {
 		ctx.Profiles = config.Profiles{Source: "file", Path: *profiles}
+	}
+	if *hostCAPats != "" {
+		ctx.HostCAPatterns = strings.Split(*hostCAPats, ",")
 	}
 	if *signRole != "" {
 		if ctx.Roles == nil {
@@ -183,6 +188,10 @@ func trust(ctx context.Context, g *globals, name string, c *config.Context, b ba
 	}
 	if len(patterns) == 0 {
 		patterns = profile.KnownHostsPatterns(profiles)
+	}
+	if len(patterns) == 0 {
+		// Hosts describe themselves through their certificates.
+		patterns = []string{"*"}
 	}
 	file := config.KnownHostsFile()
 	changed, err := knownhosts.Install(file, name, patterns, keys)

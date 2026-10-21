@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -42,8 +43,11 @@ type Context struct {
 	CA         CA                `yaml:"ca,omitempty"`
 	Roles      map[string]string `yaml:"roles,omitempty"`
 	Principals string            `yaml:"principals,omitempty"`
-	TTL        string            `yaml:"ttl,omitempty"`
-	Profiles   Profiles          `yaml:"profiles,omitempty"`
+	// PrincipalPatterns limits, per persona, which principals listed in a
+	// host certificate are requested (for example agent: ["agent:*"]).
+	PrincipalPatterns map[string][]string `yaml:"principal_patterns,omitempty"`
+	TTL               string              `yaml:"ttl,omitempty"`
+	Profiles          Profiles            `yaml:"profiles,omitempty"`
 	// HostCAPatterns limits which host names the host CA is trusted for.
 	HostCAPatterns []string `yaml:"host_ca_patterns,omitempty"`
 	Local          *Local   `yaml:"local,omitempty"`
@@ -238,6 +242,13 @@ func (ctx *Context) validate() error {
 	case "", "one", "many":
 	default:
 		return errors.New("principals must be one or many")
+	}
+	for persona, patterns := range ctx.PrincipalPatterns {
+		for _, p := range patterns {
+			if _, err := path.Match(p, ""); err != nil {
+				return fmt.Errorf("principal_patterns.%s: %q: %w", persona, p, err)
+			}
+		}
 	}
 	if ctx.TTL != "" {
 		if _, err := time.ParseDuration(ctx.TTL); err != nil {

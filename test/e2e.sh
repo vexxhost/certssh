@@ -64,7 +64,8 @@ jq -n '{key_type: "ca", allow_user_certificates: true, allowed_users: "env:infra
   default_extensions: {"permit-pty": ""}, allowed_extensions: "permit-pty", ttl: "1h",
   key_id_format: "{{token_display_name}}"}' | bao write ssh-client-signer/roles/human - >/dev/null
 bao write ssh-host-signer/roles/host key_type=ca allow_host_certificates=true \
-  allowed_domains='*' allow_bare_domains=true allow_subdomains=true ttl=24h >/dev/null
+  allowed_domains='*' allow_bare_domains=true allow_subdomains=true ttl=24h \
+  allowed_extensions=certssh-principals@vexxhost.com >/dev/null
 bao policy write ssh-infra - >/dev/null <<'EOF'
 path "ssh-client-signer/sign/human" {
   capabilities        = ["create", "update"]
@@ -74,12 +75,14 @@ path "ssh-client-signer/sign/human" {
 EOF
 USER_TOKEN=$(bao token create -display-name=alice -policy=ssh-infra -ttl=1h -field=token)
 
-start_sshd() { # name principal
-  local name=$1 principal=$2 port
+start_sshd() { # name principal [principals to list in the host certificate]
+  local name=$1 principal=$2 listed=${3:-} port
   port=$(free_port)
   ssh-keygen -q -t ed25519 -N '' -f "$WORK/$name-host"
-  bao write -field=signed_key ssh-host-signer/sign/host cert_type=host valid_principals="$name" \
-    public_key=@"$WORK/$name-host.pub" >"$WORK/$name-host-cert.pub"
+  jq -n --rawfile key "$WORK/$name-host.pub" --arg name "$name" --arg listed "$listed" \
+    '{public_key: $key, cert_type: "host", valid_principals: $name}
+     + (if $listed == "" then {} else {extensions: {"certssh-principals@vexxhost.com": $listed}} end)' \
+    | bao write -field=signed_key ssh-host-signer/sign/host - >"$WORK/$name-host-cert.pub"
   echo "$principal" >"$WORK/$name-principals"
   cat >"$WORK/$name-sshd_config" <<EOF
 Port $port
@@ -102,16 +105,15 @@ EOF
   echo "$port"
 }
 
-echo "== starting sshd for infra-1 (env:infra) and public-1 (env:public)"
-INFRA_PORT=$(start_sshd infra-1 env:infra)
+# infra-1's host certificate lists the principals it accepts, so it needs no
+# profile; public-1 is found through the profile file.
+echo "== starting sshd for infra-1 (env:infra, listed in its certificate) and public-1 (env:public)"
+INFRA_PORT=$(start_sshd infra-1 env:infra env:infra)
 PUBLIC_PORT=$(start_sshd public-1 env:public)
 
 cat >"$WORK/profile.yaml" <<'EOF'
 version: 1
 profiles:
-  - name: infra
-    principal: env:infra
-    hosts: [infra-*]
   - name: public
     principal: env:public
     hosts: [public-*]
@@ -124,7 +126,8 @@ for _ in $(seq 1 50); do [ -S "$SOCK" ] && break; sleep 0.1; done
 [ -S "$SOCK" ] || fail "agent socket did not appear"
 
 echo "== logging in (the agent picks the new context up)"
-env -u BAO_TOKEN "$WORK/certssh" login -method token -token "$USER_TOKEN" -profiles "$WORK/profile.yaml" "$BAO_ADDR" \
+env -u BAO_TOKEN "$WORK/certssh" login -method token -token "$USER_TOKEN" -profiles "$WORK/profile.yaml" \
+  -host-ca-patterns 'infra-*,public-*' "$BAO_ADDR" \
   >"$WORK/login.log" 2>&1 || fail "login failed"
 grep -q "Logged in to 127.0.0.1 as token-alice" "$WORK/login.log" || fail "unexpected login output"
 grep -q '^@cert-authority infra-\*,public-\* ssh-ed25519 .* certssh:127.0.0.1$' "$HOME/.ssh/known_hosts" \
@@ -140,7 +143,7 @@ plain_ssh() { # alias port
 }
 signs() { certssh status -json | jq -r .signs; }
 
-echo "== ssh to infra-1 gets an env:infra certificate signed on demand"
+echo "== ssh to infra-1 gets the env:infra certificate its host certificate asks for"
 plain_ssh infra-1 "$INFRA_PORT" || fail "ssh to infra-1 failed"
 grep -q "Accepted publickey for $USER_NAME .*ED25519-CERT.*ID token-alice" "$WORK/infra-1-sshd.log" \
   || fail "infra-1 did not log the certificate login"

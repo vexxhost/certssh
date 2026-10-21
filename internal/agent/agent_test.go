@@ -162,11 +162,21 @@ func (s *server) tries() []string {
 
 func (e *env) server(names []string, principal string, plain ssh.PublicKey, withHostCert bool) (*server, ssh.Signer) {
 	e.t.Helper()
+	return e.serverListing(names, principal, plain, withHostCert, "")
+}
+
+// serverListing is server with the host certificate also listing the
+// principals the host accepts.
+func (e *env) serverListing(names []string, principal string, plain ssh.PublicKey, withHostCert bool, listed string) (*server, ssh.Signer) {
+	e.t.Helper()
 	hostKey, _ := newSigner(e.t)
 	hostSigner := hostKey
 	if withHostCert {
 		cert := &ssh.Certificate{Key: hostKey.PublicKey(), CertType: ssh.HostCert, KeyId: names[0],
 			ValidPrincipals: names, ValidBefore: ssh.CertTimeInfinity}
+		if listed != "" {
+			cert.Extensions = map[string]string{HostPrincipalsExtension: listed}
+		}
 		if err := cert.SignCert(rand.Reader, e.hostCA); err != nil {
 			e.t.Fatal(err)
 		}
@@ -676,4 +686,69 @@ func TestListenRefusesARunningAgent(t *testing.T) {
 		t.Fatalf("stale socket not replaced: %v", err)
 	}
 	l2.Close()
+}
+
+func TestHostCertificateListsItsPrincipals(t *testing.T) {
+	requireSSH(t)
+	e := newEnv(t, func(c *config.Config) { c.Contexts["test"].Profiles.Inline = nil })
+	// No profiles at all: the host says what it accepts. The first listed
+	// principal is refused by the CA, the second works.
+	srv, _ := e.serverListing([]string{"kvm-7"}, "env:public", nil, true, "env:secret, env:public,env:public")
+	for range 2 {
+		if err := e.ssh(srv, "kvm-7"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := srv.tries(); len(got) != 2 || got[0] != "cert:env:public" || got[1] != "cert:env:public" {
+		t.Fatalf("saw %v, want only the env:public certificate", got)
+	}
+	if n := e.agent.Signs(); n != 2 {
+		t.Fatalf("signed %d, want 2 (one refusal, remembered, then env:public once)", n)
+	}
+}
+
+func TestHostListOverridesProfiles(t *testing.T) {
+	requireSSH(t)
+	e := newEnv(t, nil)
+	// The infra-* profile says env:infra, but the host knows better.
+	srv, _ := e.serverListing([]string{"infra-9"}, "env:public", nil, true, "env:public")
+	if err := e.ssh(srv, "infra-9"); err != nil {
+		t.Fatal(err)
+	}
+	if got := srv.tries(); len(got) != 1 || got[0] != "cert:env:public" {
+		t.Fatalf("saw %v", got)
+	}
+}
+
+func TestPrincipalPatternsSkipOtherPersonas(t *testing.T) {
+	requireSSH(t)
+	e := newEnv(t, func(c *config.Config) {
+		c.Contexts["test"].Local.AllowedPrincipals = []string{"agent:infra"}
+		c.Contexts["test"].PrincipalPatterns = map[string][]string{"agent": {"agent:*"}}
+	})
+	e.login(config.PersonaAgent)
+	srv, _ := e.serverListing([]string{"ctl-1"}, "agent:infra", nil, true, "env:infra,agent:infra")
+	if err := e.ssh(srv, "ctl-1"); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.agent.Signs(); n != 1 {
+		t.Fatalf("signed %d, want 1: env:infra should not even be requested", n)
+	}
+}
+
+func TestHostListFromAnotherCAIsIgnored(t *testing.T) {
+	e := newEnv(t, nil)
+	rogueCA, _ := newSigner(t)
+	k, _ := newSigner(t)
+	cert := &ssh.Certificate{Key: k.PublicKey(), CertType: ssh.HostCert, ValidPrincipals: []string{"evil"},
+		ValidBefore: ssh.CertTimeInfinity, Permissions: ssh.Permissions{Extensions: map[string]string{HostPrincipalsExtension: "env:infra"}}}
+	if err := cert.SignCert(rand.Reader, rogueCA); err != nil {
+		t.Fatal(err)
+	}
+	rogue, _ := ssh.NewCertSigner(cert, k)
+	ag, done := e.bindTo(t, rogue, false)
+	defer done()
+	if keys, _ := ag.List(); len(keys) != 0 || e.agent.Signs() != 0 {
+		t.Fatalf("a rogue host's principal list was honoured: %d keys", len(keys))
+	}
 }

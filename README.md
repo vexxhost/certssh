@@ -32,15 +32,42 @@ server presents a host certificate, that includes the host's names. certssh
 uses this to:
 
 1. check that the host certificate was signed by your CA's host CA, so only
-   names your CA vouches for count;
-2. match those names against your profiles to pick the principal, for example
-   `*.prod.example.com` → `env:prod`;
+   what your CA vouches for counts;
+2. read the principals the host accepts from its certificate, or else match
+   the host's names against your profiles (`*.prod.example.com` →
+   `env:prod`);
 3. sign a certificate for that principal if it does not hold a valid one
    (one request, however many connections are waiting);
 4. offer only that certificate, followed by your other keys.
 
 Hosts without a host certificate are recognised by the names recorded for
 their key in `~/.ssh/known_hosts`.
+
+## Which principal a host needs
+
+The simplest setup needs no client configuration at all: put the principals
+a host accepts in its host certificate, in the
+`certssh-principals@vexxhost.com` extension, in order of preference:
+
+```sh
+bao write ssh-host-signer/sign/host - <<EOF
+{"public_key": "$(cat /etc/ssh/ssh_host_ed25519_key.pub)", "cert_type": "host",
+ "valid_principals": "web-1.prod.example.com",
+ "extensions": {"certssh-principals@vexxhost.com": "env:prod,agent:prod"}}
+EOF
+```
+
+The host role must allow the extension (`allowed_extensions`). OpenSSH
+ignores extensions it does not know, so these certificates work with any
+client. Whatever signs your host keys (Ansible, cloud-init, a bootstrap
+script) already knows each host's environment, so the list stays current
+without anything to distribute. certssh tries the listed principals in order
+and remembers which ones the CA refused; `principal_patterns` skips the ones
+a persona can never get.
+
+For hosts whose certificates do not carry the list, or that have no host
+certificate, a profile file maps host names to principals (see
+[Configuration](#configuration)). When a certificate carries a list, it wins.
 
 The private key is generated in memory at login and never written to disk;
 certificates live as long as the CA allows. Logging in again replaces the
@@ -120,6 +147,10 @@ contexts:
       human: human
       agent: agent
     principals: one                # one certificate per principal, or "many" in one certificate
+    principal_patterns:            # which listed principals each persona requests
+      human: ["env:*"]
+      agent: ["agent:*"]
+    host_ca_patterns: ["*.example.com", "10.*"]   # where the host CA is trusted (default: profile hosts, or *)
     profiles:
       source: file                 # or inline (the default)
       path: ~/.config/certssh/example.yaml
@@ -129,7 +160,8 @@ agent:
   allow_forwarded: false           # sign for connections through a forwarded agent
 ```
 
-A profile file maps hosts to principals:
+A profile file maps host names to principals, for hosts whose certificates
+do not list them:
 
 ```yaml
 version: 1
@@ -174,7 +206,8 @@ EOF
 bao secrets enable -path=ssh-host-signer ssh
 bao write ssh-host-signer/config/ca generate_signing_key=true key_type=ssh-ed25519
 bao write ssh-host-signer/roles/host key_type=ca allow_host_certificates=true \
-  allowed_domains='*' allow_bare_domains=true allow_subdomains=true ttl=2160h
+  allowed_domains='*' allow_bare_domains=true allow_subdomains=true ttl=2160h \
+  allowed_extensions=certssh-principals@vexxhost.com
 ```
 
 Scope who may sign which principal with policies, for example:
@@ -203,10 +236,11 @@ To revoke certificates before they expire, see
 
 - The private key exists only in the agent's memory.
 - Session tokens are stored mode 0600 under `~/.config/certssh/sessions/`.
-- A host's names are only trusted from a host certificate signed by the
-  context's host CA (checked against the `@cert-authority` line), or from
-  your own `known_hosts`. The `session-bind` signature proves the server holds
-  that host key.
+- A host's names and principal list are only trusted from a host
+  certificate signed by the context's host CA (checked against the
+  `@cert-authority` line), or from your own `known_hosts`. The `session-bind`
+  signature proves the server holds that host key. Either way the CA's policy
+  still decides what may be signed.
 - Connections through a forwarded agent get no certificates and cannot add,
   remove or lock keys unless `allow_forwarded` is set.
 - certssh requests exactly the principal a host needs and never sets

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -169,6 +170,57 @@ func (cs *contextState) principalsFor(persona string, names []string) ([]string,
 	return []string{p.PrincipalFor(persona)}, p.Name
 }
 
+// hintedPrincipals returns the principals a host certificate lists, keeping
+// only those the persona's principal_patterns allow.
+func (cs *contextState) hintedPrincipals(persona string, cert *ssh.Certificate) []string {
+	value := cert.Extensions[HostPrincipalsExtension]
+	if value == "" {
+		return nil
+	}
+	patterns := cs.cfg.PrincipalPatterns[persona]
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range strings.Split(value, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" || seen[p] || !matchesAny(p, patterns) {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
+}
+
+func matchesAny(s string, patterns []string) bool {
+	if len(patterns) == 0 {
+		return true
+	}
+	for _, p := range patterns {
+		if ok, _ := path.Match(p, s); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureFirst returns a certificate for the first candidate principal the CA
+// will sign, moving on when one is refused. Refusals are remembered, so later
+// connections skip straight to the principal that worked.
+func (a *Agent) ensureFirst(cs *contextState, candidates []string, host string) (*certEntry, error) {
+	var lastErr error
+	for _, p := range candidates {
+		e, err := a.ensure(cs, []string{p}, host)
+		if err == nil {
+			return e, nil
+		}
+		if !errors.Is(err, backend.ErrDenied) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
 // persona returns the persona of the current session, or human.
 func (cs *contextState) persona() string {
 	cs.mu.Lock()
@@ -264,7 +316,7 @@ func (a *Agent) sign(cs *contextState, sess *backend.Session, key ssh.Signer, id
 			cs.mu.Lock()
 			cs.denied[k] = deniedEntry{until: a.now().Add(deniedFor), reason: err.Error()}
 			cs.mu.Unlock()
-			a.log.Warn("CA refused to sign", "context", cs.name, "principals", k, "host", host, "error", err)
+			a.log.Info("CA refused to sign", "context", cs.name, "principals", k, "host", host, "error", err)
 		}
 		return nil, err
 	}

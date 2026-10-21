@@ -127,7 +127,13 @@ func (c *conn) List() ([]*agent.Key, error) {
 	res := c.a.resolve(*target)
 	host := hostLabel(res.names, target.HostKey)
 	if res.identified && certsAllowed {
-		e, err := c.a.ensure(res.cs, res.principals, host)
+		var e *certEntry
+		var err error
+		if len(res.hinted) > 0 {
+			e, err = c.a.ensureFirst(res.cs, res.hinted, host)
+		} else {
+			e, err = c.a.ensure(res.cs, res.principals, host)
+		}
 		switch {
 		case err == nil:
 			keys := []*agent.Key{certKey(e)}

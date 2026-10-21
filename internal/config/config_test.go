@@ -37,6 +37,7 @@ func TestValidate(t *testing.T) {
 		{Address: "https://x", Profiles: Profiles{Source: "kv"}},
 		{Address: "https://x", Profiles: Profiles{Source: "file"}},
 		{Address: "https://x", Profiles: Profiles{Inline: []profile.Profile{{Name: "x"}}}},
+		{Address: "https://x", PrincipalPatterns: map[string][]string{"agent": {"agent:["}}},
 	}
 	for i, c := range bad {
 		cfg := &Config{Contexts: map[string]*Context{"c": c}}

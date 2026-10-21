@@ -254,12 +254,20 @@ func (a *Agent) handle(c net.Conn) {
 	}
 }
 
+// HostPrincipalsExtension is a host-certificate extension listing, in order
+// of preference and separated by commas, the user principals the host
+// accepts. OpenSSH ignores extensions it does not know.
+const HostPrincipalsExtension = "certssh-principals@vexxhost.com"
+
 // resolution is what the agent decided about a connection's host.
 type resolution struct {
 	cs         *contextState
 	principals []string
-	profile    string
-	names      []string
+	// hinted are principals the host certificate lists, tried in order
+	// one certificate at a time.
+	hinted  []string
+	profile string
+	names   []string
 	// identified means the host's names come from a host certificate
 	// signed by the context's host CA, or from known_hosts.
 	identified bool
@@ -274,7 +282,11 @@ func (a *Agent) resolve(b Bind) resolution {
 				continue
 			}
 			names := cert.ValidPrincipals
-			principals, prof := cs.principalsFor(cs.persona(), names)
+			persona := cs.persona()
+			if hinted := cs.hintedPrincipals(persona, cert); len(hinted) > 0 {
+				return resolution{cs: cs, hinted: hinted, profile: "(host certificate)", names: names, identified: true}
+			}
+			principals, prof := cs.principalsFor(persona, names)
 			return resolution{cs: cs, principals: principals, profile: prof, names: names, identified: principals != nil}
 		}
 	}
