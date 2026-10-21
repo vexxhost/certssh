@@ -1,0 +1,25 @@
+version: "2"
+linters:
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - noctx
+    - revive
+    - unconvert
+  settings:
+    gosec:
+      excludes:
+        - G304 # paths come from the user's configuration
+        - G703 # same, as seen by taint analysis
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx]
+formatters:
+  enable:
+    - gofmt
+    - goimports
