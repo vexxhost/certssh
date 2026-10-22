@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -271,23 +272,37 @@ type resolution struct {
 	// identified means the host's names come from a host certificate
 	// signed by the context's host CA, or from known_hosts.
 	identified bool
+	// reason explains the outcome for the debug log.
+	reason string
 }
 
 // resolve works out which context and principals a bound host needs.
 func (a *Agent) resolve(b Bind) resolution {
 	_, contexts, _ := a.snapshot()
+	certReason := "plain host key"
 	if cert, ok := b.HostKey.(*ssh.Certificate); ok && cert.CertType == ssh.HostCert {
+		certReason = "host certificate signed by a CA no context trusts (" + ssh.FingerprintSHA256(cert.SignatureKey) + ")"
 		for _, cs := range contexts {
-			if !signedBy(cert, a.hostCAKeys(cs)) || !certValid(cert, a.now()) {
+			if !signedBy(cert, a.hostCAKeys(cs)) {
+				continue
+			}
+			if !certValid(cert, a.now()) {
+				certReason = "host certificate from " + cs.name + "'s CA is invalid or expired"
 				continue
 			}
 			names := cert.ValidPrincipals
 			persona := cs.persona()
 			if hinted := cs.hintedPrincipals(persona, cert); len(hinted) > 0 {
-				return resolution{cs: cs, hinted: hinted, profile: "(host certificate)", names: names, identified: true}
+				return resolution{cs: cs, hinted: hinted, profile: "(host certificate)", names: names, identified: true,
+					reason: "host certificate lists " + strings.Join(hinted, ",")}
 			}
 			principals, prof := cs.principalsFor(persona, names)
-			return resolution{cs: cs, principals: principals, profile: prof, names: names, identified: principals != nil}
+			if principals == nil {
+				return resolution{cs: cs, names: names, reason: fmt.Sprintf(
+					"host certificate from %s lists no principal for persona %s, and no profile matches %v", cs.name, persona, names)}
+			}
+			return resolution{cs: cs, principals: principals, profile: prof, names: names, identified: true,
+				reason: "profile " + prof}
 		}
 	}
 	key := b.HostKey
@@ -296,7 +311,7 @@ func (a *Agent) resolve(b Bind) resolution {
 	}
 	names := knownhosts.HostsFor(a.knownHosts, key)
 	if len(names) == 0 {
-		return resolution{}
+		return resolution{reason: certReason + ", and the key is not in " + a.knownHosts}
 	}
 	for _, cs := range contexts {
 		persona := cs.persona()
@@ -304,10 +319,11 @@ func (a *Agent) resolve(b Bind) resolution {
 			continue
 		}
 		if principals, prof := cs.principalsFor(persona, names); principals != nil {
-			return resolution{cs: cs, principals: principals, profile: prof, names: names, identified: true}
+			return resolution{cs: cs, principals: principals, profile: prof, names: names, identified: true,
+				reason: "known_hosts name matches profile " + prof}
 		}
 	}
-	return resolution{names: names}
+	return resolution{names: names, reason: fmt.Sprintf("%s; known_hosts names %v match no profile", certReason, names)}
 }
 
 func signedBy(cert *ssh.Certificate, cas []ssh.PublicKey) bool {

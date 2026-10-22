@@ -113,6 +113,7 @@ func (c *conn) List() ([]*agent.Key, error) {
 
 	if !bound {
 		// ssh-add -l, or a client without session-bind: show everything we hold.
+		c.a.log.Debug("key list requested without a session-bind (ssh-add, or ssh older than 8.9)", "conn", c.id)
 		keys := others
 		if certsAllowed {
 			for _, cs := range contexts {
@@ -126,6 +127,11 @@ func (c *conn) List() ([]*agent.Key, error) {
 
 	res := c.a.resolve(*target)
 	host := hostLabel(res.names, target.HostKey)
+	if res.identified {
+		c.a.log.Debug("host recognised", "conn", c.id, "host", host, "context", res.cs.name, "why", res.reason)
+	} else {
+		c.a.log.Debug("host not recognised", "conn", c.id, "host", host, "why", res.reason)
+	}
 	if res.identified && certsAllowed {
 		var e *certEntry
 		var err error
@@ -358,6 +364,7 @@ func (c *conn) Extension(name string, contents []byte) ([]byte, error) {
 			c.a.log.Debug("rejecting session-bind", "conn", c.id, "error", err)
 			return nil, err
 		}
+		c.a.log.Debug("session-bind", "conn", c.id, "host_key", describeKey(b.HostKey), "forwarding", b.Forwarding)
 		c.mu.Lock()
 		if len(c.binds) >= maxBinds {
 			c.mu.Unlock()
@@ -380,6 +387,13 @@ func (c *conn) Extension(name string, contents []byte) ([]byte, error) {
 		return up.Extension(name, contents)
 	}
 	return nil, agent.ErrExtensionUnsupported
+}
+
+func describeKey(k ssh.PublicKey) string {
+	if cert, ok := k.(*ssh.Certificate); ok {
+		return fmt.Sprintf("certificate %q for %v from CA %s", cert.KeyId, cert.ValidPrincipals, ssh.FingerprintSHA256(cert.SignatureKey))
+	}
+	return k.Type() + " " + ssh.FingerprintSHA256(k)
 }
 
 func (a *Agent) dropCert(e *certEntry) {

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -43,10 +42,11 @@ func cmdStatus(g *globals, args []string) error {
 	switch {
 	case err == nil:
 		fmt.Fprintf(w, "Agent\t%s (certssh %s)\n", tilde(socket), st.Version)
-		if sameSocket(os.Getenv("SSH_AUTH_SOCK"), socket) {
-			fmt.Fprintf(w, "\tSSH_AUTH_SOCK points here\n")
+		if hint := agentHint(socket, cfg.Path()); hint == "" {
+			fmt.Fprintf(w, "\tssh uses this agent\n")
 		} else {
-			fmt.Fprintf(w, "\tSSH_AUTH_SOCK does not point here: export SSH_AUTH_SOCK=%s\n", tilde(socket))
+			_ = w.Flush()
+			fmt.Fprintf(g.out, "\n%s\n", hint)
 		}
 		if st.Upstream != "" {
 			fmt.Fprintf(w, "\tupstream agent %s\n", tilde(st.Upstream))
