@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -50,6 +51,61 @@ func TestValidate(t *testing.T) {
 	}
 	if err := (&Config{Agent: Agent{Key: "tpm"}}).Validate(); err == nil {
 		t.Error("unsupported key backends must be rejected")
+	}
+}
+
+func TestSaveSkipsUnchangedAndRefusesNixStore(t *testing.T) {
+	dir := t.TempDir()
+	store := filepath.Join(dir, "nix", "store", "abc-certssh-config.yaml")
+	if err := os.MkdirAll(filepath.Dir(store), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store, []byte("current: a\ncontexts:\n  a: {address: \"https://a.example.com\"}\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Dir(store), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Dir(store), 0o755) })
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink(store, link); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Current = "a"
+	if err := c.Save(); err != nil {
+		t.Fatalf("an unchanged config must not be written: %v", err)
+	}
+	c.Contexts["a"].Namespace = "x"
+	if err := c.Save(); err == nil {
+		t.Fatal("writing a read-only target should fail")
+	}
+
+	// A symlink into a writable dotfiles checkout is written through.
+	dotfiles := filepath.Join(dir, "dotfiles", "certssh.yaml")
+	if err := os.MkdirAll(filepath.Dir(dotfiles), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dotfiles, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link2 := filepath.Join(dir, "config2.yaml")
+	if err := os.Symlink(dotfiles, link2); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := Load(link2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2.Contexts = map[string]*Context{"b": {Address: "https://b.example.com"}}
+	if err := c2.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(link2); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the symlink was replaced by a file")
 	}
 }
 

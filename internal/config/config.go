@@ -3,6 +3,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"net/url"
@@ -31,6 +32,9 @@ type Config struct {
 	Agent    Agent               `yaml:"agent,omitempty"`
 
 	path string
+	// saved is the configuration as last read or written, so Save can skip
+	// writing a file that would not change.
+	saved []byte
 }
 
 // Context is one certificate authority and how to log in to it.
@@ -165,13 +169,16 @@ func Load(path string) (*Config, error) {
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	c.saved, _ = yaml.Marshal(c)
 	return c, nil
 }
 
 // Path is the file this config was loaded from.
 func (c *Config) Path() string { return c.path }
 
-// Save writes the configuration file atomically.
+// Save writes the configuration file atomically when it changed. A file
+// that is a symlink (a dotfiles checkout) is written through; one that
+// resolves into the Nix store is refused with an explanation.
 func (c *Config) Save() error {
 	if err := c.Validate(); err != nil {
 		return err
@@ -180,12 +187,22 @@ func (c *Config) Save() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
+	if bytes.Equal(data, c.saved) {
+		return nil
+	}
+	target := c.path
+	if resolved, err := filepath.EvalSymlinks(c.path); err == nil {
+		target = resolved
+	}
+	if strings.HasPrefix(target, "/nix/store/") {
+		return fmt.Errorf("%s is managed by Nix, so certssh cannot change it; make the change in programs.certssh.settings", c.path)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(c.path), ".config-*.yaml")
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".config-*.yaml")
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot write %s: %w", c.path, err)
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(data); err != nil {
@@ -195,7 +212,11 @@ func (c *Config) Save() error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), c.path)
+	if err := os.Rename(tmp.Name(), target); err != nil {
+		return err
+	}
+	c.saved = data
+	return nil
 }
 
 // Validate checks every context and the agent settings.
