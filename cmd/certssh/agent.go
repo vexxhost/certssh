@@ -113,22 +113,27 @@ func cmdAgentInstall(g *globals, args []string) error {
 		return nil
 	}
 
-	// Remember an existing agent so its keys stay available through ours.
-	if cur := os.Getenv("SSH_AUTH_SOCK"); cfg.Agent.Upstream == "" && cur != "" && !sameSocket(cur, socket) && svc.RecordUpstream(cur) {
-		cfg.Agent.Upstream = cur
-		if err := cfg.Save(); err != nil {
-			return err
+	// Remember the agent ssh uses today so its keys stay available through
+	// ours. An IdentityAgent setting (1Password, Secretive) has a stable path
+	// on every system; SSH_AUTH_SOCK only on Linux.
+	if cfg.Agent.Upstream == "" {
+		cur, fromConfig := sshAgent()
+		if cur != "" && !sameSocket(cur, socket) && (fromConfig || svc.RecordUpstream(cur)) {
+			cfg.Agent.Upstream = cur
+			if err := cfg.Save(); err != nil {
+				return err
+			}
+			fmt.Fprintf(g.out, "Keys from %s stay available through certssh (agent.upstream)\n", tilde(cur))
 		}
-		fmt.Fprintf(g.out, "Keys from %s stay available through certssh (agent.upstream)\n", tilde(cur))
 	}
 	if err := svc.Install(); err != nil {
 		return err
 	}
 	fmt.Fprintf(g.out, "Installed %s\n", tilde(svc.Path))
-	if !sameSocket(os.Getenv("SSH_AUTH_SOCK"), socket) {
-		fmt.Fprintf(g.out, "\nAdd this to your shell profile so ssh uses the agent:\n\n    export SSH_AUTH_SOCK=%s\n", tilde(socket))
-		if hint := svc.EnvHint(); hint != "" {
-			fmt.Fprintln(g.out, strings.TrimRight("\n"+hint, "\n"))
+	if hint := agentHint(socket, cfg.Path()); hint != "" {
+		fmt.Fprintf(g.out, "\n%s", hint)
+		if env := svc.EnvHint(); env != "" {
+			fmt.Fprintln(g.out, strings.TrimRight("\n"+env, "\n"))
 		}
 	}
 	return nil

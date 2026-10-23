@@ -219,8 +219,8 @@ func reportAgent(g *globals, cfg *config.Config) {
 		fmt.Fprintf(g.errOut, "\nThe certssh agent is not running. Start it with:\n\n    certssh agent install\n\n")
 		return
 	}
-	if !sameSocket(os.Getenv("SSH_AUTH_SOCK"), socket) {
-		fmt.Fprintf(g.errOut, "\nssh is not using the certssh agent yet. Add this to your shell profile:\n\n    export SSH_AUTH_SOCK=%s\n\n", tilde(socket))
+	if hint := agentHint(socket, cfg.Path()); hint != "" {
+		fmt.Fprintf(g.errOut, "\n%s\n", hint)
 	}
 }
 
