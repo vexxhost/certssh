@@ -106,6 +106,46 @@ echo 'export SSH_AUTH_SOCK=~/.certssh/agent.sock' >> ~/.zshrc   # or ~/.bashrc
 (on Linux) so its keys stay available. On macOS the system agent is found
 automatically.
 
+### Nix
+
+The flake provides the package, an overlay and a home-manager module that
+runs the agent as a user service, points `ssh` at it and keeps your previous
+agent's keys available:
+
+```nix
+# flake.nix
+inputs.certssh = {
+  url = "github:vexxhost/certssh";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+
+# home-manager
+imports = [ inputs.certssh.homeManagerModules.default ];
+
+programs.ssh.enable = true;
+programs.certssh = {
+  enable = true;
+  agent.upstream = "~/.1password/agent.sock";   # the IdentityAgent you had before
+  settings = {
+    current = "openbao.example.com";
+    contexts."openbao.example.com" = {
+      address = "https://openbao.example.com";
+      login.human.mount = "oidc";
+    };
+  };
+};
+```
+
+The module sets `IdentityAgent` in the `Host *` block of `programs.ssh`; if
+you set `IdentityAgent` yourself, move that socket to `agent.upstream`.
+With `settings` declared, `~/.config/certssh/config.yaml` is managed by Nix
+and `certssh login` logs in without changing it; leave `settings` empty to
+let `certssh login <address>` create contexts instead. Then:
+
+```sh
+certssh login
+```
+
 ## Logging in
 
 ```sh

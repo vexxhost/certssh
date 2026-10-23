@@ -125,7 +125,9 @@ func cmdLogin(g *globals, args []string) error {
 		}
 		ctx.Login[*persona] = l
 	}
-	cfg.Current = name
+	if current, _, _ := cfg.Resolve(""); current != name {
+		cfg.Current = name
+	}
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -216,7 +218,7 @@ func trust(ctx context.Context, g *globals, name string, c *config.Context, b ba
 func reportAgent(g *globals, cfg *config.Config) {
 	socket := cfg.SocketPath()
 	if err := agent.RequestReload(socket); err != nil {
-		fmt.Fprintf(g.errOut, "\nThe certssh agent is not running. Start it with:\n\n    certssh agent install\n\n")
+		fmt.Fprintf(g.errOut, "\nThe certssh agent is not running. Start it with:\n\n    certssh agent install\n\nor, with home-manager, programs.certssh.enable (see the README).\n\n")
 		return
 	}
 	if hint := agentHint(socket, cfg.Path()); hint != "" {
