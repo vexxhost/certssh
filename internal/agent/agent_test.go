@@ -752,3 +752,34 @@ func TestHostListFromAnotherCAIsIgnored(t *testing.T) {
 		t.Fatalf("a rogue host's principal list was honoured: %d keys", len(keys))
 	}
 }
+
+func TestExplainHostCertificate(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) {
+		c.Contexts["test"].PrincipalPatterns = map[string][]string{"human": {"env:*"}, "agent": {"agent:*"}}
+	})
+	hostCert := func(ca ssh.Signer) ssh.PublicKey {
+		hostKey, _ := newSigner(t)
+		cert := &ssh.Certificate{Key: hostKey.PublicKey(), CertType: ssh.HostCert, KeyId: "web",
+			ValidPrincipals: []string{"web"}, ValidBefore: ssh.CertTimeInfinity,
+			Permissions: ssh.Permissions{Extensions: map[string]string{HostPrincipalsExtension: "env:infra,agent:infra"}}}
+		if err := cert.SignCert(rand.Reader, ca); err != nil {
+			t.Fatal(err)
+		}
+		return cert
+	}
+	key := hostCert(e.hostCA)
+
+	got := e.agent.Explain(key, "")
+	if !got.Recognised || got.Context != "test" || strings.Join(got.Candidates, ",") != "env:infra" {
+		t.Fatalf("session persona: %+v", got)
+	}
+	got = e.agent.Explain(key, config.PersonaAgent)
+	if !got.Recognised || strings.Join(got.Candidates, ",") != "agent:infra" {
+		t.Fatalf("agent persona: %+v", got)
+	}
+
+	other, _ := newSigner(t)
+	if got := e.agent.Explain(hostCert(other), ""); got.Recognised || !strings.Contains(got.Reason, "no context trusts") {
+		t.Fatalf("untrusted CA: %+v", got)
+	}
+}

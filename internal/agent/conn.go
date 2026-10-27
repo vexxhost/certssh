@@ -125,7 +125,7 @@ func (c *conn) List() ([]*agent.Key, error) {
 		return keys, nil
 	}
 
-	res := c.a.resolve(*target)
+	res := c.a.resolve(target.HostKey, "")
 	host := hostLabel(res.names, target.HostKey)
 	if res.identified {
 		c.a.log.Debug("host recognised", "conn", c.id, "host", host, "context", res.cs.name, "why", res.reason)

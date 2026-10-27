@@ -98,7 +98,14 @@ KbdInteractiveAuthentication no
 UsePAM no
 StrictModes no
 LogLevel VERBOSE
+# The test opens 20 connections at once.
+MaxStartups 100
 EOF
+  # OpenSSH 9.8+ penalises the readiness probe below (a connection without
+  # authentication) and then refuses the parallel connections from 127.0.0.1.
+  if "$SSHD_BIN" -t -f "$WORK/$name-sshd_config" -o PerSourcePenalties=no 2>/dev/null; then
+    echo "PerSourcePenalties no" >>"$WORK/$name-sshd_config"
+  fi
   "$SSHD_BIN" -D -e -f "$WORK/$name-sshd_config" >"$WORK/$name-sshd.log" 2>&1 &
   PIDS+=($!)
   for _ in $(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null && break; sleep 0.1; done

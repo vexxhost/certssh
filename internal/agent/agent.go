@@ -276,11 +276,18 @@ type resolution struct {
 	reason string
 }
 
-// resolve works out which context and principals a bound host needs.
-func (a *Agent) resolve(b Bind) resolution {
+// resolve works out which context and principals a host needs. An empty
+// persona means each context's session persona.
+func (a *Agent) resolve(hostKey ssh.PublicKey, persona string) resolution {
 	_, contexts, _ := a.snapshot()
+	personaFor := func(cs *contextState) string {
+		if persona != "" {
+			return persona
+		}
+		return cs.persona()
+	}
 	certReason := "plain host key"
-	if cert, ok := b.HostKey.(*ssh.Certificate); ok && cert.CertType == ssh.HostCert {
+	if cert, ok := hostKey.(*ssh.Certificate); ok && cert.CertType == ssh.HostCert {
 		certReason = "host certificate signed by a CA no context trusts (" + ssh.FingerprintSHA256(cert.SignatureKey) + ")"
 		for _, cs := range contexts {
 			if !signedBy(cert, a.hostCAKeys(cs)) {
@@ -291,7 +298,7 @@ func (a *Agent) resolve(b Bind) resolution {
 				continue
 			}
 			names := cert.ValidPrincipals
-			persona := cs.persona()
+			persona := personaFor(cs)
 			if hinted := cs.hintedPrincipals(persona, cert); len(hinted) > 0 {
 				return resolution{cs: cs, hinted: hinted, profile: "(host certificate)", names: names, identified: true,
 					reason: "host certificate lists " + strings.Join(hinted, ",")}
@@ -305,7 +312,7 @@ func (a *Agent) resolve(b Bind) resolution {
 				reason: "profile " + prof}
 		}
 	}
-	key := b.HostKey
+	key := hostKey
 	if cert, ok := key.(*ssh.Certificate); ok {
 		key = cert.Key
 	}
@@ -314,7 +321,7 @@ func (a *Agent) resolve(b Bind) resolution {
 		return resolution{reason: certReason + ", and the key is not in " + a.knownHosts}
 	}
 	for _, cs := range contexts {
-		persona := cs.persona()
+		persona := personaFor(cs)
 		if _, ok := profile.Match(cs.profiles, persona, names...); !ok {
 			continue
 		}
@@ -324,6 +331,41 @@ func (a *Agent) resolve(b Bind) resolution {
 		}
 	}
 	return resolution{names: names, reason: fmt.Sprintf("%s; known_hosts names %v match no profile", certReason, names)}
+}
+
+// Explanation is what the agent would do for a host presenting a key.
+type Explanation struct {
+	// Recognised reports whether the agent would sign and offer a
+	// certificate for this host.
+	Recognised bool
+	Context    string
+	// Candidates are principals listed by the host certificate, tried one
+	// certificate at a time in this order.
+	Candidates []string
+	// Principals go together in one certificate (from a profile).
+	Principals []string
+	Profile    string
+	// Names are the host names the decision was based on.
+	Names  []string
+	Reason string
+}
+
+// Explain resolves a host key the way the agent does after a session-bind.
+// An empty persona means each context's session persona.
+func (a *Agent) Explain(hostKey ssh.PublicKey, persona string) Explanation {
+	res := a.resolve(hostKey, persona)
+	e := Explanation{
+		Recognised: res.identified,
+		Candidates: res.hinted,
+		Principals: res.principals,
+		Profile:    res.profile,
+		Names:      res.names,
+		Reason:     res.reason,
+	}
+	if res.cs != nil {
+		e.Context = res.cs.name
+	}
+	return e
 }
 
 func signedBy(cert *ssh.Certificate, cas []ssh.PublicKey) bool {

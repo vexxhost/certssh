@@ -165,7 +165,9 @@ OpenBao's `direct` or `device` callback modes: it prints a link for a person
 to approve and waits up to ten minutes.
 
 `certssh status` shows the agent, sessions, certificates and principals the
-CA refused. `certssh which <host>` shows which profile a host name maps to.
+CA refused. `certssh which <host>` connects to the host, reads its host key
+and shows the context and principals the agent would use, from the host
+certificate or a profile; `-offline` matches the name against profiles only.
 
 ## Configuration
 

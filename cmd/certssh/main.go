@@ -33,7 +33,7 @@ Commands:
   trust              Trust the context's host CA in ~/.ssh/known_hosts
   contexts           List contexts
   use <context>      Select the current context
-  which <host>       Show which profile and principal a host name maps to
+  which <host>       Show the context and principals the agent uses for a host
   version            Print the version
 
 Run certssh <command> -h for a command's flags.
