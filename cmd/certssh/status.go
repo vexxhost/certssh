@@ -11,8 +11,6 @@ import (
 	sshagent "golang.org/x/crypto/ssh/agent"
 
 	"github.com/vexxhost/certssh/internal/agent"
-	"github.com/vexxhost/certssh/internal/config"
-	"github.com/vexxhost/certssh/internal/profile"
 	"github.com/vexxhost/certssh/internal/session"
 )
 
@@ -177,55 +175,4 @@ func cmdUse(g *globals, args []string) error {
 	_ = agent.RequestReload(cfg.SocketPath())
 	fmt.Fprintf(g.out, "Using %s\n", pos[0])
 	return nil
-}
-
-// cmdWhich resolves a host name the way the agent does when it only has
-// names to go on.
-func cmdWhich(g *globals, args []string) error {
-	fs := newFlagSet(g, "which", "which [-as persona] <host>")
-	persona := fs.String("as", "", "persona (default: the session's, or human)")
-	pos, err := parseInterspersed(fs, args)
-	if err != nil {
-		return err
-	}
-	if len(pos) != 1 {
-		return errors.New("which takes one host name")
-	}
-	cfg, err := g.load()
-	if err != nil {
-		return err
-	}
-	store := g.store()
-	for _, name := range cfg.Names() {
-		ctx := cfg.Contexts[name]
-		p := *persona
-		if p == "" {
-			p = config.PersonaHuman
-			if s, err := store.Load(name); err == nil && s.Persona != "" {
-				p = s.Persona
-			}
-		}
-		profiles, _, err := ctx.LoadProfiles()
-		if err != nil {
-			return fmt.Errorf("context %q: %w", name, err)
-		}
-		if _, ok := profile.Match(profiles, p, pos[0]); !ok {
-			continue
-		}
-		if ctx.ManyPrincipals() {
-			var all []string
-			for _, pr := range profiles {
-				if v := pr.PrincipalFor(p); v != "" {
-					all = append(all, v)
-				}
-			}
-			fmt.Fprintf(g.out, "%s: context %s (one certificate for %s)\n", pos[0], name, strings.Join(all, ","))
-			return nil
-		}
-		if pr, ok := profile.Match(profiles, p, pos[0]); ok {
-			fmt.Fprintf(g.out, "%s: context %s, profile %s, principal %s\n", pos[0], name, pr.Name, pr.PrincipalFor(p))
-			return nil
-		}
-	}
-	return fmt.Errorf("%s matches no profile", pos[0])
 }
