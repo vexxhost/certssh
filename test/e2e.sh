@@ -98,8 +98,9 @@ KbdInteractiveAuthentication no
 UsePAM no
 StrictModes no
 LogLevel VERBOSE
-# The test opens 20 connections at once.
-MaxStartups 100
+# The test opens 20 connections at once. All three values are needed: with
+# just "100", random early drop still starts at the default of 10.
+MaxStartups 100:30:100
 EOF
   # OpenSSH 9.8+ penalises the readiness probe below (a connection without
   # authentication) and then refuses the parallel connections from 127.0.0.1.
