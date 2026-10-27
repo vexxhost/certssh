@@ -22,7 +22,9 @@ trap cleanup EXIT
 
 fail() {
   echo "FAIL: $*" >&2
-  for f in "$WORK"/*.log; do echo "--- $f" >&2; tail -n 40 "$f" >&2; done
+  for f in "$WORK"/*sshd.log; do echo "--- $f" >&2; cat "$f" >&2; done
+  for f in "$WORK"/*sshd_config; do echo "--- $f" >&2; cat "$f" >&2; done
+  "$SSHD_BIN" -V >&2 2>&1 || true
   exit 1
 }
 
@@ -166,6 +168,7 @@ echo "== 20 parallel connections reuse the certificate"
 pids=()
 for _ in $(seq 1 20); do plain_ssh infra-1 "$INFRA_PORT" & pids+=($!); done
 for p in "${pids[@]}"; do wait "$p" || fail "a parallel ssh failed"; done
+fail "diagnostic stop"
 [ "$(signs)" = 2 ] || fail "parallel connections caused new signing requests: $(signs)"
 
 certssh status >"$WORK/status.txt" || fail "status failed"
