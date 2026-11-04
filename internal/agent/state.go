@@ -173,7 +173,11 @@ func (cs *contextState) principalsFor(persona string, names []string) ([]string,
 // hintedPrincipals returns the principals a host certificate lists, keeping
 // only those the persona's principal_patterns allow.
 func (cs *contextState) hintedPrincipals(persona string, cert *ssh.Certificate) []string {
-	value := cert.Extensions[HostPrincipalsExtension]
+	ext := HostPrincipalsExtension
+	if cs.cfg.PrincipalsExtension != "" {
+		ext = cs.cfg.PrincipalsExtension
+	}
+	value := cert.Extensions[ext]
 	if value == "" {
 		return nil
 	}

@@ -783,3 +783,31 @@ func TestExplainHostCertificate(t *testing.T) {
 		t.Fatalf("untrusted CA: %+v", got)
 	}
 }
+
+func TestPrincipalsExtensionOverride(t *testing.T) {
+	const custom = "certssh-principals@example.com"
+	e := newEnv(t, func(c *config.Config) {
+		// No profiles: recognition must come from the host-certificate extension.
+		c.Contexts["test"].Profiles.Inline = nil
+		c.Contexts["test"].PrincipalsExtension = custom
+	})
+	host := func(ext map[string]string) ssh.PublicKey {
+		hostKey, _ := newSigner(t)
+		cert := &ssh.Certificate{Key: hostKey.PublicKey(), CertType: ssh.HostCert, KeyId: "web",
+			ValidPrincipals: []string{"web"}, ValidBefore: ssh.CertTimeInfinity,
+			Permissions: ssh.Permissions{Extensions: ext}}
+		if err := cert.SignCert(rand.Reader, e.hostCA); err != nil {
+			t.Fatal(err)
+		}
+		return cert
+	}
+	// The configured extension name is read instead of the default.
+	if got := e.agent.Explain(host(map[string]string{custom: "env:infra"}), ""); !got.Recognised ||
+		got.Context != "test" || strings.Join(got.Candidates, ",") != "env:infra" {
+		t.Fatalf("custom extension not honoured: %+v", got)
+	}
+	// With an override set, the default extension name is not consulted.
+	if got := e.agent.Explain(host(map[string]string{HostPrincipalsExtension: "env:infra"}), ""); got.Recognised {
+		t.Fatalf("default extension honoured despite override: %+v", got)
+	}
+}

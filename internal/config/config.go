@@ -50,8 +50,13 @@ type Context struct {
 	// PrincipalPatterns limits, per persona, which principals listed in a
 	// host certificate are requested (for example agent: ["agent:*"]).
 	PrincipalPatterns map[string][]string `yaml:"principal_patterns,omitempty"`
-	TTL               string              `yaml:"ttl,omitempty"`
-	Profiles          Profiles            `yaml:"profiles,omitempty"`
+	// PrincipalsExtension overrides the host-certificate extension name that
+	// lists the user principals a host accepts. Empty uses the default,
+	// certssh-principals@vexxhost.com. Operators running their own CA may set
+	// their own name@domain here; the signer must use the same name.
+	PrincipalsExtension string   `yaml:"principals_extension,omitempty"`
+	TTL                 string   `yaml:"ttl,omitempty"`
+	Profiles            Profiles `yaml:"profiles,omitempty"`
 	// HostCAPatterns limits which host names the host CA is trusted for.
 	HostCAPatterns []string `yaml:"host_ca_patterns,omitempty"`
 	Local          *Local   `yaml:"local,omitempty"`

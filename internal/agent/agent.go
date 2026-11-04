@@ -255,9 +255,10 @@ func (a *Agent) handle(c net.Conn) {
 	}
 }
 
-// HostPrincipalsExtension is a host-certificate extension listing, in order
-// of preference and separated by commas, the user principals the host
-// accepts. OpenSSH ignores extensions it does not know.
+// HostPrincipalsExtension is the default host-certificate extension listing,
+// in order of preference and separated by commas, the user principals the host
+// accepts. OpenSSH ignores extensions it does not know. A context may override
+// the name with principals_extension (config.Context.PrincipalsExtension).
 const HostPrincipalsExtension = "certssh-principals@vexxhost.com"
 
 // resolution is what the agent decided about a connection's host.

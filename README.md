@@ -208,6 +208,7 @@ contexts:
       human: ["env:*"]
       agent: ["agent:*"]
     host_ca_patterns: ["*.example.com", "10.*"]   # where the host CA is trusted (default: profile hosts, or *)
+    principals_extension: certssh-principals@vexxhost.com   # host-cert extension that lists the accepted principals (this is the default; override only if your CA signs a different name@domain)
     profiles:
       source: file                 # or inline (the default)
       path: ~/.config/certssh/example.yaml
